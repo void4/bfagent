@@ -92,6 +92,12 @@ class Agent:
 			elif com == "f":
 				self.pos[0] += sin(self.rot) * 0.1
 				self.pos[1] += cos(self.rot) * 0.1
+			elif com == "x":
+				if self.energy > 300:
+					self.reproduce = True
+			elif com == "n":
+				self.tape[self.pt%tapelen] = self.near
+			"""
 			elif com == "c":
 				if self.energy > 200:
 					self.energy -= 200
@@ -99,12 +105,7 @@ class Agent:
 					child.rot = rs(2*pi)
 					child.energy = 100
 					agents.append(child)
-			elif com == "x":
-				if self.energy > 300:
-					self.reproduce = True
-			elif com == "n":
-				self.tape[self.pt%tapelen] = self.near
-			
+			"""
 			self.ip += 1
 
 # Random scaled number
@@ -144,8 +145,8 @@ def codegen():
 def PIL2array(img):
     return np.array(img.getdata(),np.uint8).reshape(img.size[1], img.size[0], 3)
 
-# Mixes/mutates two strings
-def mutate(s1, s2):
+# Chooses character at random
+def mutate_random(s1, s2):
 	result = ""
 	minl = min(len(s1),len(s2))
 	maxl = max(len(s1),len(s2))
@@ -157,6 +158,29 @@ def mutate(s1, s2):
 			s.append(s2[i])
 		result += choice(s)
 	return result
+
+# Cuts two strings to the same length
+def string_samelen(s1, s2):
+	if len(s1) < len(s2):
+		s2 = s2[:len(s1)]
+	if len(s1) > len(s2):
+		s1 = s1[:len(s2)]
+	return s1, s2
+
+# Splits slices
+def mutate_split(s1, s2):
+	result = ""
+	
+	split = randint(0,min(len(s1), len(s2)))
+	if randint(0,1) == 0:
+		return s1[:split]+s2[split:]
+	else:
+		return s2[:split]+s1[split:]
+
+# Mixes/mutates two strings
+def mutate(s1, s2):
+	return mutate_split(s1, s2)
+
 images = []
 
 agents = [Agent() for i in range(NUM_AGENTS)]
@@ -165,7 +189,7 @@ food = [rp() for i in range(1000)]
 
 w = h = WORLD_SIZE*IMG_SCALE
 
-def step():
+def step(count):
 	global agents
 
 	im = Image.new("RGB", (w,h), color="white")
@@ -219,11 +243,12 @@ def step():
 		agent.out = []
 	#im.save("anim/%i.jpg" % i)
 	agents = [agent for agentindex, agent in enumerate(agents) if agentindex not in remove]
-	images.append(PIL2array(im))
+	if count % 5 == 0:
+		images.append(PIL2array(im))
 
 try:
 	for i in range(1000000):
-		step()
+		step(i)
 except KeyboardInterrupt:
 	pass
 
