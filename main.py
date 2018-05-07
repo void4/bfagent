@@ -2,9 +2,11 @@ from random import random, choice, randint
 from math import sin, cos, pi
 from copy import deepcopy
 from scipy.spatial import KDTree
-import numpy as numpy
+from PIL import Image, ImageDraw
+import numpy as np
 import imageio
 
+IMG_SCALE = 10
 MAX_IO_LEN = 10
 TAPE_SIZE = 128
 NUM_AGENTS = 20
@@ -28,6 +30,8 @@ class Agent:
 		self.pt = 0
 		self.inp = []
 		self.out = []
+		self.near = 0
+		self.reproduce = False
 		self.buildmap()
 	
 	def buildmap(self):
@@ -61,6 +65,7 @@ class Agent:
 			ipo = self.ip%codelen
 			com = self.code[ipo]
 			tapelen = len(self.tape)
+			self.reproduce = False
 			if com == ">":
 				self.pt += 1
 			elif com == "<":
@@ -94,49 +99,74 @@ class Agent:
 					child.rot = rs(2*pi)
 					child.energy = 100
 					agents.append(child)
+			elif com == "x":
+				if self.energy > 300:
+					self.reproduce = True
+			elif com == "n":
+				self.tape[self.pt%tapelen] = self.near
 			
 			self.ip += 1
 
+# Random scaled number
 def rs(scale):
 	return random()*scale
 
+# Random vector with specified dimension
 def rv(scale, dimension):
 	return [rs(scale) for d in range(dimension)]
-
-instr = "><+-.,[]lrfc"
-def codegen():
-	return "".join(choice(instr) for i in range(randint(1,100)))
 
 # Random position
 def rp():
 	return rv(WORLD_SIZE, WORLD_DIM)
 
-agents = [Agent() for i in range(NUM_AGENTS)]
-food = [rp() for i in range(1000)]
-from PIL import Image, ImageDraw
-IMG_SCALE = 10
-w = h = WORLD_SIZE*IMG_SCALE
-
 # Scale vector
 def sv(scale, v):
 	return [e*scale for e in v]
 
-# Modulo vectro
+# Modulo vector
 def mv(mod, v):
 	return [e%mod for e in v]
 
+# Average vector
+def av(v1, v2):
+	return [(v1[i]+v2[i])/2 for i in range(len(v1))]
+
+# Rectangle coordinates
 def rect(pos, scale):
 	return [pos[0]-scale,pos[1]-scale,pos[0]+scale,pos[1]+scale]
 
+# Generate random code sequence
+instr = "><+-.,[]lrfcxn"
+def codegen():
+	return "".join(choice(instr) for i in range(randint(1,100)))
 
-
+# Converts PIL image to numpy array
 def PIL2array(img):
-    return numpy.array(img.getdata(),
-                    numpy.uint8).reshape(img.size[1], img.size[0], 3)
+    return np.array(img.getdata(),np.uint8).reshape(img.size[1], img.size[0], 3)
 
+# Mixes/mutates two strings
+def mutate(s1, s2):
+	result = ""
+	minl = min(len(s1),len(s2))
+	maxl = max(len(s1),len(s2))
+	for i in range(randint(minl,maxl)):
+		s = []
+		if i<len(s1):
+			s.append(s1[i])
+		if i<len(s2):
+			s.append(s2[i])
+		result += choice(s)
+	return result
 images = []
 
+agents = [Agent() for i in range(NUM_AGENTS)]
+food = [rp() for i in range(1000)]
+
+
+w = h = WORLD_SIZE*IMG_SCALE
+
 def step():
+	global agents
 
 	im = Image.new("RGB", (w,h), color="white")
 	draw = ImageDraw.Draw(im)
@@ -145,12 +175,14 @@ def step():
 		draw.rectangle(sv(IMG_SCALE, rect(f, 0.05)), fill="green")
 
 	tree = KDTree(food)
+	agtree = KDTree([agent.pos for agent in agents])
 	
 	if i%10 == 0:
 		print(len(agents))
 		food.append(rp())
 
-	for agent in agents:
+	remove = []
+	for agentindex, agent in enumerate(agents):
 		agent.run(24)
 		agent.pos = mv(WORLD_SIZE, agent.pos)
 		near = tree.query_ball_point(agent.pos, 0.5)
@@ -162,16 +194,31 @@ def step():
 			agent.energy += 20
 		agent.energy -= 1
 		if agent.energy < 0:
-			agents.remove(agent)
+			remove.append(agentindex)
 			continue
 		rwh = 0.1
 		draw.rectangle(sv(IMG_SCALE, rect(agent.pos, rwh)), fill="black")
-		for b in agents:
-			if b != agent:
-				if b.distance(agent) < 10:
-					for call in agent.out:
-						b.push(call)
+
+		if agent.reproduce:
+			near_agents = agtree.query_ball_point(agent.pos, 5)
+			if len(near_agents) > 0:
+				#print("reproduced!")
+				other_agent = agents[near_agents[0]]
+				new_pos = av(agent.pos, other_agent.pos)
+				new_code = mutate(agent.code, other_agent.code)
+				new_agent = Agent(pos=new_pos, code=new_code)
+				agents.append(new_agent)
+
+		near_agents = agtree.query_ball_point(agent.pos, 10)
+		agent.near = len(near_agents)
+		for b in near_agents:
+			if b != agentindex:
+				other_agent = agents[b]
+				for call in agent.out:
+					other_agent.push(call)
+		agent.out = []
 	#im.save("anim/%i.jpg" % i)
+	agents = [agent for agentindex, agent in enumerate(agents) if agentindex not in remove]
 	images.append(PIL2array(im))
 
 try:
